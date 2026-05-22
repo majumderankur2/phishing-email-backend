@@ -1,0 +1,11 @@
+text,label
+"URGENT! Verify your PayPal password immediately",phishing
+"Your account has been suspended click here",phishing
+"Claim your free reward now",phishing
+"Reset your bank password immediately",phishing
+"Win lottery now click below",phishing
+"Meeting scheduled for tomorrow at 2 PM",safe
+"Project submission deadline extended",safe
+"Lunch at 1 PM today?",safe
+"Here are the meeting notes from yesterday",safe
+"Invoice attached for your review",safe
