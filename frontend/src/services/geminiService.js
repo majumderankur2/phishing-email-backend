@@ -1,9 +1,11 @@
 // geminiService.js
-// This now calls your Flask backend instead of Gemini
+// This calls your Flask backend (local in dev, Render in production)
+
+const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:5000";
 
 export const analyzeEmailWithGemini = async (emailText) => {
   try {
-    const response = await fetch("http://127.0.0.1:5000/api/scan", {
+    const response = await fetch(`${API_URL}/api/scan`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -19,8 +21,7 @@ export const analyzeEmailWithGemini = async (emailText) => {
     }
 
     const data = await response.json();
-    const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:5000";
-    // Normalise backend response to match what your Dashboard expects
+
     return {
       label:            capitaliseLabel(data.label),
       score:            data.score,
@@ -37,7 +38,7 @@ export const analyzeEmailWithGemini = async (emailText) => {
       label:            "Error",
       score:            0,
       confidence:       0,
-      explanation:      "Backend connection failed. Make sure Flask is running on port 5000.",
+      explanation:      "Backend connection failed. Make sure Flask is running.",
       indicators:       [],
       votes:            "",
       engine_breakdown: {},
@@ -45,7 +46,7 @@ export const analyzeEmailWithGemini = async (emailText) => {
   }
 };
 
-// Converts "phishing" → "Suspicious", "safe" → "Safe", "suspicious" → "Suspicious"
+// Converts "phishing" → "Suspicious", "safe" → "Safe"
 function capitaliseLabel(label) {
   if (!label) return "Unknown";
   const l = label.toLowerCase();
