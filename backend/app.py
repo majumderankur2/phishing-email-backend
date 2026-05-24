@@ -1,5 +1,6 @@
 # ============================================================
 #  app.py  —  Phishing Detection API  (Full Multi-AI Version)
+#             + Redis Cache (Step 4)
 # ============================================================
 
 import logging
@@ -20,6 +21,15 @@ try:
 except ImportError:
     BERT_AVAILABLE = False
 
+# ── Redis Cache (Step 4 addition) ───────────────────────────
+try:
+    from cache import get_cached_result, save_to_cache, get_cache_stats
+    CACHE_AVAILABLE = True
+    print("✅ Redis cache imported successfully")
+except ImportError:
+    CACHE_AVAILABLE = False
+    print("⚠️  cache.py not found — caching disabled")
+
 # ── Logging ─────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -30,8 +40,9 @@ logger = logging.getLogger(__name__)
 # ── Flask app ────────────────────────────────────────────────
 app = Flask(__name__)
 CORS(app, origins=[
-    "http://localhost:5173",           # local dev
-    "https://your-app.vercel.app",     # production (fill this in later)
+    "http://localhost:5173",
+    "https://phishing-email-frontend.vercel.app",
+    "https://phishing-email-frontend-git-main-majumderankur2s-projects.vercel.app",
 ])
 
 # ============================================================
@@ -62,9 +73,8 @@ def normalise_ml(result):
 def normalise_rules(result):
     score      = float(result.get("score", 0))
     indicators = result.get("indicators", [])
-    # rule score is additive (10 per keyword), cap at 100
     capped     = min(score, 100)
-    is_phish   = capped >= 20   # 2+ keywords = suspicious
+    is_phish   = capped >= 20
     return {
         "is_phishing": is_phish,
         "confidence":  round(capped / 100, 3),
@@ -98,7 +108,6 @@ def normalise_bert(result):
 def run_all_engines(email_text):
     raw = {}
 
-    # Define tasks using actual function names
     tasks = {
         "groq":  (analyze_with_groq,           email_text),
         "ml":    (predict_email,                email_text),
@@ -121,7 +130,6 @@ def run_all_engines(email_text):
                 logger.error(f"Engine '{name}' error: {e}")
                 raw[name] = {"score": 0, "indicators": [], "error": str(e)}
 
-    # Normalise each engine result
     normalised = {}
     if "groq"  in raw: normalised["groq"]  = normalise_groq(raw["groq"])
     if "ml"    in raw: normalised["ml"]    = normalise_ml(raw["ml"])
@@ -135,7 +143,6 @@ def run_all_engines(email_text):
 #  SCORER: weighted ensemble + majority vote
 # ============================================================
 def calculate_final_score(engine_results):
-    # Weights — adjust based on which engines are available
     base_weights = {
         "groq":  0.35,
         "bert":  0.25,
@@ -144,16 +151,13 @@ def calculate_final_score(engine_results):
         "url":   0.08,
     }
 
-    # Only use weights for engines that ran
     active_weights = {k: v for k, v in base_weights.items() if k in engine_results}
-
-    # Re-normalise weights to sum to 1.0
     total_w = sum(active_weights.values())
     weights = {k: v / total_w for k, v in active_weights.items()}
 
-    weighted_score  = 0.0
-    votes_phishing  = 0
-    all_indicators  = []
+    weighted_score   = 0.0
+    votes_phishing   = 0
+    all_indicators   = []
     groq_explanation = ""
 
     for name, result in engine_results.items():
@@ -175,7 +179,6 @@ def calculate_final_score(engine_results):
     final_score   = round(weighted_score * 100, 1)
     majority      = votes_phishing > (total_engines / 2)
 
-    # Label
     if final_score >= 65:
         label = "phishing"
     elif final_score >= 35 or majority:
@@ -183,7 +186,6 @@ def calculate_final_score(engine_results):
     else:
         label = "safe"
 
-    # Safety override
     if majority and label == "safe":
         label = "suspicious"
 
@@ -210,13 +212,15 @@ def calculate_final_score(engine_results):
 @app.route("/", methods=["GET"])
 def health_check():
     return jsonify({
-        "status":  "running",
-        "version": "2.0",
+        "status":        "running",
+        "version":       "2.1",                          # bumped to 2.1 for cache release
         "bert_available": BERT_AVAILABLE,
-        "engines": list(["groq", "ml", "rules", "url"] + (["bert"] if BERT_AVAILABLE else [])),
+        "cache_enabled": CACHE_AVAILABLE,
+        "engines":       list(["groq", "ml", "rules", "url"] + (["bert"] if BERT_AVAILABLE else [])),
     })
 
 
+# ── /api/scan  (Step 4: cache check added) ──────────────────
 @app.route("/api/scan", methods=["POST"])
 def scan_email():
     try:
@@ -230,11 +234,26 @@ def scan_email():
 
         logger.info(f"Scan request — length: {len(email_text)} chars")
 
+        # ── STEP 4A: Check Redis cache FIRST ────────────────
+        if CACHE_AVAILABLE:
+            cached = get_cached_result(email_text)
+            if cached is not None:
+                logger.info("Cache HIT — returning saved result instantly")
+                cached["cache_hit"] = True          # frontend badge flag
+                return jsonify(cached), 200
+
+        # ── STEP 4B: Cache MISS — run all 5 engines ─────────
+        logger.info("Cache MISS — running all engines")
         engine_results = run_all_engines(email_text)
         final          = calculate_final_score(engine_results)
+        final["cache_hit"] = False                  # first time, not cached
+
+        # ── STEP 4C: Save fresh result to cache ─────────────
+        if CACHE_AVAILABLE:
+            save_to_cache(email_text, final)
+            logger.info("Result saved to Redis cache (TTL: 24 h)")
 
         logger.info(f"Result — label: {final['label']}, score: {final['score']}, votes: {final['votes']}")
-
         return jsonify(final), 200
 
     except concurrent.futures.TimeoutError:
@@ -246,6 +265,20 @@ def scan_email():
         return jsonify({"error": "Internal server error", "detail": str(e)}), 500
 
 
+# ── /api/cache/stats  (Step 4: new route) ───────────────────
+@app.route("/api/cache/stats", methods=["GET"])
+def cache_stats():
+    """Returns Redis cache hit/miss statistics."""
+    if not CACHE_AVAILABLE:
+        return jsonify({"error": "Cache is not enabled on this server"}), 503
+    try:
+        stats = get_cache_stats()
+        return jsonify(stats), 200
+    except Exception as e:
+        logger.error(f"Cache stats error: {e}")
+        return jsonify({"error": "Could not fetch cache stats", "detail": str(e)}), 500
+
+
 @app.route("/api/engines/status", methods=["GET"])
 def engine_status():
     return jsonify({
@@ -255,6 +288,7 @@ def engine_status():
         "rules":        True,
         "url":          True,
         "total_active": 4 + (1 if BERT_AVAILABLE else 0),
+        "cache":        CACHE_AVAILABLE,
     })
 
 
@@ -280,6 +314,7 @@ def unhandled_exception(e):
 #  ENTRY POINT
 # ============================================================
 if __name__ == "__main__":
-    logger.info("Starting Phishing Detection API v2.0")
+    logger.info("Starting Phishing Detection API v2.1")
     logger.info(f"BERT engine: {'ENABLED' if BERT_AVAILABLE else 'DISABLED'}")
+    logger.info(f"Redis cache: {'ENABLED' if CACHE_AVAILABLE else 'DISABLED'}")
     app.run(debug=True, host="0.0.0.0", port=5000)
