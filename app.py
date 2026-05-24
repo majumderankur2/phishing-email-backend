@@ -51,7 +51,7 @@ CORS(app, origins=[
 def normalise_groq(result):
     label = str(result.get("label", "")).lower()
     score = float(result.get("score", 0))
-    is_phish = label in ("suspicious", "phishing") or score >= 50
+    is_phish = label in ("suspicious", "phishing")
     return {
         "is_phishing": is_phish,
         "confidence":  round(score / 100, 3),
