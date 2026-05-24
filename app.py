@@ -266,6 +266,17 @@ def scan_email():
 
 
 # ── /api/cache/stats  (Step 4: new route) ───────────────────
+@app.route("/api/cache/clear", methods=["POST"])
+def clear_cache():
+    if not CACHE_AVAILABLE:
+        return jsonify({"error": "Cache not enabled"}), 503
+    try:
+        from cache import get_redis_client
+        r = get_redis_client()
+        r.flushdb()
+        return jsonify({"status": "Cache cleared successfully"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 @app.route("/api/cache/stats", methods=["GET"])
 def cache_stats():
     """Returns Redis cache hit/miss statistics."""
