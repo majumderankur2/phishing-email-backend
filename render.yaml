@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: phishing-detector-backend
+    runtime: python
+    buildCommand: "pip install --upgrade pip && pip install torch==2.1.0+cpu --index-url https://download.pytorch.org/whl/cpu && pip install -r requirements.txt"
+    startCommand: "gunicorn app:app"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.0
