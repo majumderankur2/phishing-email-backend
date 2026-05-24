@@ -169,7 +169,7 @@ def calculate_final_score(engine_results):
             votes_phishing += 1
             weighted_score += w * confidence
         else:
-            weighted_score += w * (1.0 - confidence)
+            weighted_score += w * 0.0
 
         all_indicators += result.get("indicators", [])
         if name == "groq":
@@ -177,17 +177,13 @@ def calculate_final_score(engine_results):
 
     total_engines = len(engine_results)
     final_score   = round(weighted_score * 100, 1)
-    majority      = votes_phishing > (total_engines / 2)
 
     if final_score >= 65:
         label = "phishing"
-    elif final_score >= 35 or majority:
+    elif final_score >= 35:
         label = "suspicious"
     else:
         label = "safe"
-
-    if majority and label == "safe":
-        label = "suspicious"
 
     return {
         "score":            final_score,
