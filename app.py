@@ -204,7 +204,9 @@ def calculate_final_score(engine_results):
 # ============================================================
 #  ROUTES
 # ============================================================
-
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "alive"}), 200
 @app.route("/", methods=["GET"])
 def health_check():
     return jsonify({
