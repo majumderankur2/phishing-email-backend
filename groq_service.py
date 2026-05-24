@@ -1,80 +1,29 @@
 import os
-
 from groq import Groq
-
 from dotenv import load_dotenv
 
 load_dotenv()
 
-client = Groq(
-    api_key=os.getenv(
-        "GROQ_API_KEY"
-    )
-)
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 def analyze_with_groq(email_text):
-
     try:
+        prompt = f"""You are a strict phishing email detector. Analyze the email below.
 
-        prompt = f"""
-        Analyze this email for phishing attacks.
+ONLY classify as phishing if you find concrete evidence such as:
+- Suspicious or spoofed URLs (e.g. fake bank domains, .tk .xyz domains)
+- Requests for passwords, credit cards, or sensitive credentials
+- Impersonation of a real company or institution
+- Threats of account suspension or urgent action required
+- Mismatched sender domains or forged headers
 
-        Email:
-        {email_text}
+Do NOT classify as phishing based on:
+- Casual or informal language
+- Internal team communications
+- Meeting invites, lunch plans, social messages
+- Any email with no suspicious links or credential requests
 
-        Return:
-        - phishing or safe
-        - confidence score
-        - detailed explanation
-        """
+Email to analyze:
+{email_text}
 
-        completion = client.chat.completions.create(
-
-            model="llama-3.3-70b-versatile",
-
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-
-            temperature=0.3
-        )
-
-        result = (
-            completion
-            .choices[0]
-            .message
-            .content
-        )
-
-        label = "Safe"
-
-        score = 40
-
-        if "phishing" in result.lower():
-
-            label = "Suspicious"
-
-            score = 90
-
-        return {
-
-            "label": label,
-
-            "score": score,
-
-            "explanation": result
-        }
-
-    except Exception as e:
-
-        return {
-
-            "label": "Error",
-
-            "score": 0,
-
-            "explanation": str(e)
-        }
+Respond in exactly this format:
