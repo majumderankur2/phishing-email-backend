@@ -45,13 +45,16 @@ const Login = () => {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap');
 
+        * { box-sizing: border-box; }
+
         .pmn-login-root {
           min-height: 100vh;
+          min-height: 100dvh;
           background: #080c10;
           display: flex;
           align-items: center;
           justify-content: center;
-          padding: 40px 20px;
+          padding: 20px 16px;
           position: relative;
           overflow: hidden;
           font-family: 'Rajdhani', sans-serif;
@@ -90,9 +93,9 @@ const Login = () => {
           background: rgba(8, 18, 28, 0.95);
           border: 1px solid rgba(0,245,255,0.27);
           border-radius: 8px;
-          padding: 40px 44px;
+          padding: 36px 36px;
           width: 100%;
-          max-width: 380px;
+          max-width: 420px;
           box-shadow: 0 0 60px rgba(0,245,255,0.08), inset 0 0 30px rgba(0,245,255,0.04);
           animation: pmn-fadeUp 0.5s ease both;
         }
@@ -120,15 +123,15 @@ const Login = () => {
           margin-bottom: 6px;
         }
         .pmn-shield {
-          width: 38px; height: 38px;
+          width: 42px; height: 42px;
           background: rgba(0,245,255,0.12);
           border: 1px solid rgba(0,245,255,0.53);
           border-radius: 6px;
           display: flex; align-items: center; justify-content: center;
-          font-size: 20px;
+          font-size: 22px;
         }
         .pmn-brand-name {
-          font-size: 24px;
+          font-size: 26px;
           font-weight: 700;
           color: #00f5ff;
           letter-spacing: 0.04em;
@@ -141,19 +144,19 @@ const Login = () => {
         .pmn-tagline {
           text-align: center;
           font-family: 'Share Tech Mono', monospace;
-          font-size: 11px;
+          font-size: 12px;
           color: #2a5a6a;
           letter-spacing: 0.14em;
-          margin-bottom: 32px;
+          margin-bottom: 28px;
         }
 
         .pmn-label {
           display: block;
           font-family: 'Share Tech Mono', monospace;
-          font-size: 11px;
+          font-size: 12px;
           color: #3a8a9a;
           letter-spacing: 0.12em;
-          margin-bottom: 6px;
+          margin-bottom: 8px;
         }
 
         .pmn-input {
@@ -163,12 +166,14 @@ const Login = () => {
           border-radius: 4px;
           color: #a0dff0;
           font-family: 'Share Tech Mono', monospace;
-          font-size: 14px;
-          padding: 11px 14px;
+          font-size: 15px;
+          padding: 13px 14px;
           margin-bottom: 18px;
           outline: none;
           box-sizing: border-box;
           transition: border-color 0.2s, box-shadow 0.2s;
+          /* prevents iOS zoom on focus */
+          -webkit-appearance: none;
         }
         .pmn-input:focus {
           border-color: rgba(0,245,255,0.55);
@@ -183,15 +188,16 @@ const Login = () => {
           border-radius: 4px;
           color: #fff;
           font-family: 'Rajdhani', sans-serif;
-          font-size: 16px;
+          font-size: 17px;
           font-weight: 600;
           letter-spacing: 0.16em;
-          padding: 13px;
+          padding: 15px;
           cursor: pointer;
           margin-top: 4px;
           position: relative;
           overflow: hidden;
           transition: transform 0.15s, opacity 0.2s;
+          -webkit-appearance: none;
         }
         .pmn-btn-primary:hover:not(:disabled) { transform: translateY(-1px); }
         .pmn-btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
@@ -210,7 +216,7 @@ const Login = () => {
           display: flex;
           align-items: center;
           gap: 12px;
-          margin: 20px 0;
+          margin: 22px 0;
         }
         .pmn-divider-line {
           flex: 1; height: 1px;
@@ -218,7 +224,7 @@ const Login = () => {
         }
         .pmn-divider-text {
           font-family: 'Share Tech Mono', monospace;
-          font-size: 11px;
+          font-size: 12px;
           color: #2a5a6a;
           letter-spacing: 0.1em;
         }
@@ -230,16 +236,17 @@ const Login = () => {
           border-radius: 4px;
           color: #7ab8cc;
           font-family: 'Rajdhani', sans-serif;
-          font-size: 15px;
+          font-size: 16px;
           font-weight: 500;
           letter-spacing: 0.1em;
-          padding: 11px;
+          padding: 13px;
           cursor: pointer;
           display: flex;
           align-items: center;
           justify-content: center;
           gap: 10px;
           transition: border-color 0.2s, color 0.2s, opacity 0.2s;
+          -webkit-appearance: none;
         }
         .pmn-btn-google:hover:not(:disabled) {
           border-color: rgba(0,245,255,0.35);
@@ -251,7 +258,7 @@ const Login = () => {
           text-align: center;
           margin-top: 22px;
           font-family: 'Share Tech Mono', monospace;
-          font-size: 12px;
+          font-size: 13px;
           color: #2a5a6a;
           letter-spacing: 0.06em;
         }
@@ -265,7 +272,7 @@ const Login = () => {
 
         .pmn-spinner {
           display: inline-block;
-          width: 12px; height: 12px;
+          width: 13px; height: 13px;
           border: 2px solid rgba(255,255,255,0.3);
           border-top-color: #fff;
           border-radius: 50%;
@@ -275,6 +282,58 @@ const Login = () => {
         }
         @keyframes pmn-spin {
           to { transform: rotate(360deg); }
+        }
+
+        /* ── MOBILE STYLES ── */
+        @media (max-width: 480px) {
+          .pmn-login-root {
+            padding: 16px 12px;
+            align-items: center;
+          }
+          .pmn-card {
+            padding: 28px 20px;
+            max-width: 100%;
+            border-radius: 8px;
+          }
+          .pmn-shield {
+            width: 38px; height: 38px;
+            font-size: 20px;
+          }
+          .pmn-brand-name {
+            font-size: 22px;
+          }
+          .pmn-tagline {
+            font-size: 11px;
+            margin-bottom: 22px;
+          }
+          .pmn-label {
+            font-size: 13px;
+            margin-bottom: 6px;
+          }
+          .pmn-input {
+            font-size: 16px;
+            padding: 14px 12px;
+            margin-bottom: 16px;
+          }
+          .pmn-btn-primary {
+            font-size: 16px;
+            padding: 15px;
+            letter-spacing: 0.12em;
+          }
+          .pmn-btn-google {
+            font-size: 15px;
+            padding: 14px;
+          }
+          .pmn-footer {
+            font-size: 13px;
+            margin-top: 18px;
+          }
+          .pmn-divider {
+            margin: 18px 0;
+          }
+          .pmn-divider-text {
+            font-size: 12px;
+          }
         }
       `}</style>
 
@@ -342,7 +401,7 @@ const Login = () => {
             onClick={handleGoogleLogin}
             disabled={loading}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
               <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
               <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
               <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>

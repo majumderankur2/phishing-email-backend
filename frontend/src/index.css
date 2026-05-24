@@ -1,9 +1,57 @@
 @import "tailwindcss";
 
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
 body {
   margin: 0;
   padding: 0;
-  font-family: Inter, sans-serif;
-  background: #020617;
+  font-family: 'Rajdhani', sans-serif;
+  background: #080c10;
   color: white;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* ── GLOBAL MOBILE FONT SCALING ── */
+@media (max-width: 480px) {
+  html { font-size: 14px; }
+
+  /* nav items bigger on mobile */
+  .nav-item, .hist-nav .nav-item, .scan-nav .nav-item {
+    font-size: 11px !important;
+    padding: 10px 10px !important;
+    letter-spacing: 0.03em !important;
+  }
+
+  /* summary cards stack nicely */
+  .summary-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  /* table text readable */
+  .hist-table th, .hist-table td {
+    font-size: 11px !important;
+    padding: 8px 10px !important;
+  }
+
+  /* engine bars readable */
+  .engine-name { font-size: 12px !important; }
+  .engine-pct  { font-size: 12px !important; }
+
+  /* result verdict bigger */
+  .verdict-label { font-size: 18px !important; }
+  .score-num     { font-size: 22px !important; }
+
+  /* explanation text */
+  .explanation-text { font-size: 13px !important; }
+
+  /* section titles */
+  .section-title, .panel-label, .scan-page-title { 
+    font-size: 12px !important; 
+  }
+
+  /* buttons */
+  .btn-scan { font-size: 15px !important; }
 }
