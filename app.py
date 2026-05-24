@@ -271,8 +271,8 @@ def clear_cache():
     if not CACHE_AVAILABLE:
         return jsonify({"error": "Cache not enabled"}), 503
     try:
-        from cache import get_redis_client
-        r = get_redis_client()
+        import redis, os
+        r = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379"))
         r.flushdb()
         return jsonify({"status": "Cache cleared successfully"}), 200
     except Exception as e:
