@@ -10,10 +10,6 @@ import History from "../pages/History";
 import Reports from "../pages/Reports";
 import Settings from "../pages/Settings";
 
-// then in the route:
-<Route path="/history" element={
-  <ProtectedRoute><History /></ProtectedRoute>
-} />
 
 // Placeholder pages until you build them
 const ComingSoon = ({ page }) => (

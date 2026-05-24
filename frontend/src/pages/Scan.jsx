@@ -28,15 +28,25 @@ const Scan = () => {
       setResult(data);
 
       const user = auth.currentUser;
+      console.log("Saving scan for user:", user?.uid);
+      console.log("Scan data:", data);
+
       if (user) {
-        await addDoc(collection(db, "scans"), {
-          uid: user.uid,
-          email_preview: emailText.slice(0, 80),
-          score: data.score,
-          label: data.label,
-          cache_hit: data.cache_hit || false,
-          timestamp: serverTimestamp(),
-        });
+        try {
+          const docRef = await addDoc(collection(db, "scans"), {
+            uid: user.uid,
+            email_preview: emailText.slice(0, 80),
+            score: data.score,
+            label: data.label,
+            cache_hit: data.cache_hit || false,
+            timestamp: serverTimestamp(),
+          });
+          console.log("Scan saved to Firestore with ID:", docRef.id);
+        } catch (firestoreErr) {
+          console.error("Firestore save error:", firestoreErr);
+        }
+      } else {
+        console.warn("No user logged in — scan not saved.");
       }
     } catch (err) {
       setError(err.message);

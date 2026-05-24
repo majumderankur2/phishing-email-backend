@@ -51,7 +51,7 @@ CORS(app, origins=[
 def normalise_groq(result):
     label = str(result.get("label", "")).lower()
     score = float(result.get("score", 0))
-    is_phish = label in ("suspicious", "phishing") or score >= 50
+    is_phish = label in ("suspicious", "phishing")
     return {
         "is_phishing": is_phish,
         "confidence":  round(score / 100, 3),
@@ -169,7 +169,7 @@ def calculate_final_score(engine_results):
             votes_phishing += 1
             weighted_score += w * confidence
         else:
-            weighted_score += w * (1.0 - confidence)
+            weighted_score += w * 0.0
 
         all_indicators += result.get("indicators", [])
         if name == "groq":
@@ -177,17 +177,13 @@ def calculate_final_score(engine_results):
 
     total_engines = len(engine_results)
     final_score   = round(weighted_score * 100, 1)
-    majority      = votes_phishing > (total_engines / 2)
 
     if final_score >= 65:
         label = "phishing"
-    elif final_score >= 35 or majority:
+    elif final_score >= 35:
         label = "suspicious"
     else:
         label = "safe"
-
-    if majority and label == "safe":
-        label = "suspicious"
 
     return {
         "score":            final_score,
@@ -208,7 +204,9 @@ def calculate_final_score(engine_results):
 # ============================================================
 #  ROUTES
 # ============================================================
-
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "alive"}), 200
 @app.route("/", methods=["GET"])
 def health_check():
     return jsonify({
@@ -266,6 +264,17 @@ def scan_email():
 
 
 # ── /api/cache/stats  (Step 4: new route) ───────────────────
+@app.route("/api/cache/clear", methods=["POST"])
+def clear_cache():
+    if not CACHE_AVAILABLE:
+        return jsonify({"error": "Cache not enabled"}), 503
+    try:
+        import redis, os
+        r = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379"))
+        r.flushdb()
+        return jsonify({"status": "Cache cleared successfully"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 @app.route("/api/cache/stats", methods=["GET"])
 def cache_stats():
     """Returns Redis cache hit/miss statistics."""
