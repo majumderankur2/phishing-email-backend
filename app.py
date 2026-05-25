@@ -47,11 +47,7 @@ logger = logging.getLogger(__name__)
 
 # ── Flask app ─────────────────────────────────────────────────
 app = Flask(__name__)
-CORS(app, origins=[
-    "http://localhost:5173",
-    "https://phishing-email-frontend.vercel.app",
-    "https://phishing-email-frontend-git-main-majumderankur2s-projects.vercel.app",
-])
+CORS(app)
 
 # ============================================================
 #  NORMALISE: convert every engine result to same shape
