@@ -1,8 +1,7 @@
 import os
-import google.generativeai as genai
+from google import genai
 
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-model = genai.GenerativeModel("gemini-1.5-flash")
+client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
 def analyze_with_gemini(email_text: str) -> dict:
     try:
@@ -27,7 +26,10 @@ REASON: Brief reason here
 VERDICT must be exactly 'phishing' or 'safe' (lowercase).
 CONFIDENCE must be a number between 0.0 and 1.0.
 """
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt
+        )
         text = response.text.strip()
 
         verdict = "safe"
@@ -49,27 +51,26 @@ CONFIDENCE must be a number between 0.0 and 1.0.
         is_phish = verdict in ("phishing", "suspicious")
         score = round(confidence * 100) if is_phish else round((1 - confidence) * 100)
 
-        # Cap scores: safe max 35, phishing min 60
         if not is_phish:
             score = min(score, 35)
         else:
             score = max(score, 60)
 
         return {
-            "engine": "gemini",
-            "label": verdict,
-            "score": score,
+            "engine":     "gemini",
+            "label":      verdict,
+            "score":      score,
             "confidence": confidence,
-            "reason": reason,
-            "is_phish": is_phish
+            "reason":     reason,
+            "is_phish":   is_phish
         }
 
     except Exception as e:
         return {
-            "engine": "gemini",
-            "label": "safe",
-            "score": 0,
+            "engine":     "gemini",
+            "label":      "safe",
+            "score":      0,
             "confidence": 0.0,
-            "reason": f"Gemini error: {str(e)}",
-            "is_phish": False
+            "reason":     f"Gemini error: {str(e)}",
+            "is_phish":   False
         }
