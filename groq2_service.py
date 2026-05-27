@@ -1,6 +1,6 @@
 """
 groq2_service.py — Second Groq Engine
-Model: mixtral-8x7b-32768
+Model: llama-3.1-8b-instant
 Focus: Social engineering, sender credibility, urgency tactics, impersonation detection
 """
 
@@ -10,14 +10,16 @@ from groq import Groq
 client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
 
+def clean(text: str) -> str:
+    return text.encode('ascii', 'ignore').decode('ascii')
+
+
 def analyze_with_groq2(email_text: str) -> dict:
-    """
-    Analyze email text for phishing using a second Groq model (Mixtral).
-    Returns a dict with label, score, explanation, is_phish.
-    """
     try:
+        safe_email = clean(email_text[:3000])
+
         response = client.chat.completions.create(
-            model="mixtral-8x7b-32768",
+            model="llama-3.1-8b-instant",
             messages=[
                 {
                     "role": "system",
@@ -31,7 +33,7 @@ def analyze_with_groq2(email_text: str) -> dict:
                 {
                     "role": "user",
                     "content": (
-                        f"Analyze this email for phishing indicators:\n\n{email_text[:3000]}\n\n"
+                        f"Analyze this email for phishing indicators:\n\n{safe_email}\n\n"
                         "Reply in EXACTLY this format, nothing else:\n"
                         "VERDICT: phishing\nCONFIDENCE: 95\nREASON: one line reason\n\n"
                         "OR\n\n"
@@ -45,7 +47,7 @@ def analyze_with_groq2(email_text: str) -> dict:
             max_tokens=120,
         )
 
-        text = response.choices[0].message.content.strip()
+        text = clean(response.choices[0].message.content.strip())
 
         verdict    = "safe"
         confidence = 50.0
@@ -63,9 +65,7 @@ def analyze_with_groq2(email_text: str) -> dict:
             elif line.startswith("REASON:"):
                 reason = line.split(":", 1)[1].strip()
 
-        # Clamp confidence to valid range
         confidence = max(0.0, min(100.0, confidence))
-
         is_phish = verdict == "phishing"
 
         return {
