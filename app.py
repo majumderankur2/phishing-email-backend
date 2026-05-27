@@ -123,6 +123,9 @@ def calculate_final_score(engine_results):
         if is_phish:
             votes_phishing += 1
             weighted_score += w.get(name, 0.1) * confidence
+        else:
+            # Safe engines still reduce score slightly but don't add to it
+            weighted_score += w.get(name, 0.1) * confidence * 0.1
         all_indicators += result.get("indicators", [])
         if name == "groq" and result.get("explanation"):
             groq_explanation = result["explanation"]
