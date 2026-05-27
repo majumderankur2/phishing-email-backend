@@ -1,22 +1,17 @@
-# ============================================================
-#  app.py  —  Phishing Detection API  v4.0
-#  Engines : Groq + Groq2 + ML + Rules + URL
-#  Cache   : Redis (optional — gracefully disabled if absent)
-# ============================================================
-
+﻿import os
 import logging
 import concurrent.futures
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from dotenv import load_dotenv
+load_dotenv()
 
-# ── Engine imports ───────────────────────────────────────────
 from groq_service  import analyze_with_groq
 from groq2_service import analyze_with_groq2
 from ml_service    import predict_email
 from rule_engine   import detect_phishing_keywords
 from url_scanner   import detect_suspicious_urls
 
-# ── Redis cache (optional) ───────────────────────────────────
 try:
     from cache import get_cached_result, save_to_cache, get_cache_stats
     CACHE_AVAILABLE = True
@@ -25,348 +20,149 @@ except ImportError:
     CACHE_AVAILABLE = False
     print("⚠️  cache.py not found — caching disabled")
 
-# ── Logging ──────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)s  %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)s  %(message)s")
 logger = logging.getLogger(__name__)
-
-# ── Flask setup ───────────────────────────────────────────────
 app = Flask(__name__)
 CORS(app)
 
+ENGINE_WEIGHTS = {"groq": 0.35, "groq2": 0.30, "ml": 0.20, "rules": 0.10, "url": 0.05}
 
-# ============================================================
-#  NORMALISE — convert every engine result to a common shape
-# ============================================================
+def normalise_groq(r):
+    label = str(r.get("label","")).lower()
+    score = float(r.get("score",0))
+    return {"is_phishing": label in ("suspicious","phishing"), "confidence": round(score/100,3), "explanation": r.get("explanation",""), "indicators": []}
 
-def normalise_groq(result: dict) -> dict:
-    label    = str(result.get("label", "")).lower()
-    score    = float(result.get("score", 0))
-    is_phish = label in ("suspicious", "phishing")
-    return {
-        "is_phishing": is_phish,
-        "confidence":  round(score / 100, 3),
-        "explanation": result.get("explanation", ""),
-        "indicators":  [],
-    }
+def normalise_groq2(r):
+    label = str(r.get("label","")).lower()
+    score = float(r.get("score",0))
+    return {"is_phishing": label=="phishing", "confidence": round(score/100,3), "explanation": r.get("explanation",""), "indicators": []}
 
+def normalise_ml(r):
+    prediction = str(r.get("prediction","")).lower()
+    score = float(r.get("score",0))
+    return {"is_phishing": prediction=="phishing" or score>=50, "confidence": round(score/100,3), "explanation": "", "indicators": []}
 
-def normalise_groq2(result: dict) -> dict:
-    label    = str(result.get("label", "")).lower()
-    score    = float(result.get("score", 0))
-    is_phish = label == "phishing"
-    return {
-        "is_phishing": is_phish,
-        "confidence":  round(score / 100, 3),
-        "explanation": result.get("explanation", ""),
-        "indicators":  [],
-    }
+def normalise_rules(r):
+    score = min(float(r.get("score",0)),100)
+    return {"is_phishing": score>=20, "confidence": round(score/100,3), "explanation": "", "indicators": r.get("indicators",[])}
 
+def normalise_url(r):
+    score = min(float(r.get("score",0)),100)
+    return {"is_phishing": score>=20, "confidence": round(score/100,3), "explanation": "", "indicators": r.get("indicators",[])}
 
-def normalise_ml(result: dict) -> dict:
-    prediction = str(result.get("prediction", "")).lower()
-    score      = float(result.get("score", 0))
-    is_phish   = prediction == "phishing" or score >= 50
-    return {
-        "is_phishing": is_phish,
-        "confidence":  round(score / 100, 3),
-        "explanation": "",
-        "indicators":  [],
-    }
-
-
-def normalise_rules(result: dict) -> dict:
-    score      = float(result.get("score", 0))
-    indicators = result.get("indicators", [])
-    capped     = min(score, 100)
-    is_phish   = capped >= 20
-    return {
-        "is_phishing": is_phish,
-        "confidence":  round(capped / 100, 3),
-        "explanation": "",
-        "indicators":  indicators,
-    }
-
-
-def normalise_url(result: dict) -> dict:
-    score      = float(result.get("score", 0))
-    indicators = result.get("indicators", [])
-    capped     = min(score, 100)
-    is_phish   = capped >= 20
-    return {
-        "is_phishing": is_phish,
-        "confidence":  round(capped / 100, 3),
-        "explanation": "",
-        "indicators":  indicators,
-    }
-
-
-# ============================================================
-#  ORCHESTRATOR — run all 5 engines in parallel
-# ============================================================
-
-def run_all_engines(email_text: str) -> dict:
-    """
-    Submits all engines to a thread pool and waits up to 30 s.
-    Returns a dict of normalised results keyed by engine name.
-    """
-    tasks = {
-        "groq":  (analyze_with_groq,        email_text),
-        "groq2": (analyze_with_groq2,        email_text),
-        "ml":    (predict_email,             email_text),
-        "rules": (detect_phishing_keywords,  email_text),
-        "url":   (detect_suspicious_urls,    email_text),
-    }
-
+def run_all_engines(email_text):
+    tasks = {"groq": (analyze_with_groq, email_text), "groq2": (analyze_with_groq2, email_text), "ml": (predict_email, email_text), "rules": (detect_phishing_keywords, email_text), "url": (detect_suspicious_urls, email_text)}
     raw = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        future_map = {
-            executor.submit(fn, arg): name
-            for name, (fn, arg) in tasks.items()
-        }
+        future_map = {executor.submit(fn, arg): name for name, (fn, arg) in tasks.items()}
         for future in concurrent.futures.as_completed(future_map, timeout=30):
             name = future_map[future]
             try:
                 raw[name] = future.result()
             except Exception as e:
-                logger.error(f"Engine '{name}' raised an error: {e}")
+                logger.error(f"Engine '{name}' error: {e}")
                 raw[name] = {"score": 0, "indicators": [], "error": str(e)}
-
-    # Normalise each engine result
+    normalise_fn = {"groq": normalise_groq, "groq2": normalise_groq2, "ml": normalise_ml, "rules": normalise_rules, "url": normalise_url}
     normalised = {}
-    normalise_fn = {
-        "groq":  normalise_groq,
-        "groq2": normalise_groq2,
-        "ml":    normalise_ml,
-        "rules": normalise_rules,
-        "url":   normalise_url,
-    }
     for name, result in raw.items():
         try:
             normalised[name] = normalise_fn[name](result)
         except Exception as e:
-            logger.error(f"Normalisation failed for '{name}': {e}")
-            normalised[name] = {
-                "is_phishing": False,
-                "confidence":  0.0,
-                "explanation": f"Normalisation error: {e}",
-                "indicators":  [],
-            }
-
+            normalised[name] = {"is_phishing": False, "confidence": 0.0, "explanation": f"Error: {e}", "indicators": []}
     return normalised
 
-
-# ============================================================
-#  SCORER — weighted ensemble → final verdict
-# ============================================================
-
-# Base weights (will be re-normalised if engines are missing)
-ENGINE_WEIGHTS = {
-    "groq":  0.35,
-    "groq2": 0.30,
-    "ml":    0.20,
-    "rules": 0.10,
-    "url":   0.05,
-}
-
-
-def calculate_final_score(engine_results: dict) -> dict:
-    """
-    Weighted ensemble of all available engines.
-    Only phishing-positive engines contribute to the weighted score.
-    """
-    active  = {k: v for k, v in ENGINE_WEIGHTS.items() if k in engine_results}
+def calculate_final_score(engine_results):
+    active = {k: v for k, v in ENGINE_WEIGHTS.items() if k in engine_results}
     total_w = sum(active.values()) or 1.0
-    w       = {k: v / total_w for k, v in active.items()}
-
-    weighted_score   = 0.0
-    votes_phishing   = 0
-    all_indicators   = []
+    w = {k: v/total_w for k, v in active.items()}
+    weighted_score = 0.0
+    votes_phishing = 0
+    all_indicators = []
     groq_explanation = ""
-
     for name, result in engine_results.items():
         confidence = result.get("confidence", 0.0)
-        is_phish   = result.get("is_phishing", False)
-
+        is_phish = result.get("is_phishing", False)
         if is_phish:
             votes_phishing += 1
             weighted_score += w.get(name, 0.1) * confidence
-
         all_indicators += result.get("indicators", [])
-
         if name == "groq" and result.get("explanation"):
             groq_explanation = result["explanation"]
-
-    total_engines = len(engine_results)
-    final_score   = round(weighted_score * 100, 1)
-
-    if final_score >= 65:
-        label = "phishing"
-    elif final_score >= 35:
-        label = "suspicious"
-    else:
-        label = "safe"
-
-    return {
-        "score":       final_score,
-        "label":       label,
-        "confidence":  round(abs(final_score - 50) / 50, 2),
-        "votes":       f"{votes_phishing}/{total_engines} engines flagged",
-        "indicators":  list(set(all_indicators)),
-        "explanation": groq_explanation,
-        "engine_breakdown": {
-            name: {
-                "is_phishing": r["is_phishing"],
-                "confidence":  r["confidence"],
-            }
-            for name, r in engine_results.items()
-        },
-    }
-
-
-# ============================================================
-#  ROUTES
-# ============================================================
+    final_score = round(weighted_score * 100, 1)
+    label = "phishing" if final_score >= 65 else "suspicious" if final_score >= 35 else "safe"
+    return {"score": final_score, "label": label, "confidence": round(abs(final_score-50)/50,2), "votes": f"{votes_phishing}/{len(engine_results)} engines flagged", "indicators": list(set(all_indicators)), "explanation": groq_explanation, "engine_breakdown": {name: {"is_phishing": r["is_phishing"], "confidence": r["confidence"]} for name, r in engine_results.items()}}
 
 @app.route("/health", methods=["GET"])
 def health():
-    """Simple liveness probe."""
-    return jsonify({"status": "alive"}), 200
-
+    return {"status": "alive"}, 200
 
 @app.route("/", methods=["GET"])
 def root():
-    """Root health check — useful for Render / Railway deploy checks."""
-    return jsonify({
-        "status":        "running",
-        "version":       "4.0",
-        "cache_enabled": CACHE_AVAILABLE,
-        "engines":       list(ENGINE_WEIGHTS.keys()),
-    }), 200
-
+    return {"status": "running", "version": "4.0", "cache_enabled": CACHE_AVAILABLE, "engines": list(ENGINE_WEIGHTS.keys())}, 200
 
 @app.route("/api/scan", methods=["POST"])
 def scan_email():
-    """
-    Main scan endpoint.
-    Body (JSON): { "email_text": "<raw email content>" }
-    Returns:     final verdict + per-engine breakdown.
-    """
     try:
-        data       = request.get_json(force=True)
-        email_text = str(data.get("email_text", "")).strip()
-
+        data = request.get_json(force=True)
+        email_text = str(data.get("email_text","")).strip()
         if not email_text:
-            return jsonify({"error": "email_text is required"}), 400
-        if len(email_text) > 20_000:
-            return jsonify({"error": "email_text too long (max 20,000 chars)"}), 400
-
+            return {"error": "email_text is required"}, 400
+        if len(email_text) > 20000:
+            return {"error": "email_text too long"}, 400
         logger.info(f"Scan request — {len(email_text)} chars")
-
-        # ── Cache check ───────────────────────────────────────
         if CACHE_AVAILABLE:
             cached = get_cached_result(email_text)
             if cached is not None:
-                logger.info("Cache HIT")
                 cached["cache_hit"] = True
-                return jsonify(cached), 200
-
-        # ── Run engines ───────────────────────────────────────
-        logger.info("Cache MISS — running all engines")
+                return cached, 200
         engine_results = run_all_engines(email_text)
-        final          = calculate_final_score(engine_results)
+        final = calculate_final_score(engine_results)
         final["cache_hit"] = False
-
-        # ── Save to cache ─────────────────────────────────────
         if CACHE_AVAILABLE:
             save_to_cache(email_text, final)
-
-        logger.info(
-            f"Result — label: {final['label']}, "
-            f"score: {final['score']}, "
-            f"votes: {final['votes']}"
-        )
-        return jsonify(final), 200
-
+        logger.info(f"Result — label: {final['label']}, score: {final['score']}")
+        return final, 200
     except concurrent.futures.TimeoutError:
-        return jsonify({"error": "Engines timed out — please retry"}), 503
-    except ValueError as e:
-        return jsonify({"error": "Invalid input", "detail": str(e)}), 400
+        return {"error": "Engines timed out"}, 503
     except Exception as e:
-        logger.error(f"Unhandled error in /api/scan: {e}", exc_info=True)
-        return jsonify({"error": "Internal server error", "detail": str(e)}), 500
-
+        logger.error(f"Error: {e}", exc_info=True)
+        return {"error": "Internal server error", "detail": str(e)}, 500
 
 @app.route("/api/cache/clear", methods=["POST"])
 def clear_cache():
-    """Flush the entire Redis cache database."""
     if not CACHE_AVAILABLE:
-        return jsonify({"error": "Cache not enabled"}), 503
+        return {"error": "Cache not enabled"}, 503
     try:
-        import redis, os
-        r = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379"))
+        import redis
+        r = redis.from_url(os.getenv("REDIS_URL","redis://localhost:6379"))
         r.flushdb()
-        return jsonify({"status": "Cache cleared successfully"}), 200
+        return {"status": "Cache cleared successfully"}, 200
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
+        return {"error": str(e)}, 500
 
 @app.route("/api/cache/stats", methods=["GET"])
 def cache_stats():
-    """Return Redis cache statistics."""
     if not CACHE_AVAILABLE:
-        return jsonify({"error": "Cache is not enabled on this server"}), 503
+        return {"error": "Cache not enabled"}, 503
     try:
-        stats = get_cache_stats()
-        return jsonify(stats), 200
+        return get_cache_stats(), 200
     except Exception as e:
-        return jsonify({"error": "Could not fetch cache stats", "detail": str(e)}), 500
-
+        return {"error": str(e)}, 500
 
 @app.route("/api/engines/status", methods=["GET"])
 def engine_status():
-    """Return live status of all engines."""
-    return jsonify({
-        "groq":         True,
-        "groq2":        True,
-        "ml":           True,
-        "rules":        True,
-        "url":          True,
-        "total_active": 5,
-        "cache":        CACHE_AVAILABLE,
-    }), 200
-
-
-# ============================================================
-#  ERROR HANDLERS
-# ============================================================
+    return {"groq": True, "groq2": True, "ml": True, "rules": True, "url": True, "total_active": 5, "cache": CACHE_AVAILABLE}, 200
 
 @app.errorhandler(404)
 def not_found(e):
-    return jsonify({"error": "Route not found"}), 404
-
+    return {"error": "Route not found"}, 404
 
 @app.errorhandler(405)
 def method_not_allowed(e):
-    return jsonify({"error": "Method not allowed"}), 405
-
-
-@app.errorhandler(Exception)
-def unhandled_exception(e):
-    logger.error(f"Unhandled exception: {e}", exc_info=True)
-    return jsonify({"error": "Unexpected server error", "detail": str(e)}), 500
-
-
-# ============================================================
-#  ENTRY POINT
-# ============================================================
+    return {"error": "Method not allowed"}, 405
 
 if __name__ == "__main__":
-    import os
     port = int(os.getenv("PORT", 5000))
     logger.info("Starting Phishing Detection API v4.0")
     logger.info(f"Redis cache: {'ENABLED' if CACHE_AVAILABLE else 'DISABLED'}")
-    logger.info(f"Listening on port {port}")
-    app.run(debug=False, host="0.0.0.0", port=port)
+    app.run(debug=True, host="0.0.0.0", port=port)
