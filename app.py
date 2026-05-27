@@ -13,6 +13,14 @@ from rule_engine   import detect_phishing_keywords
 from url_scanner   import detect_suspicious_urls
 
 try:
+    from cohere_service import analyze_with_cohere
+    COHERE_AVAILABLE = True
+    print("✅ Cohere engine loaded")
+except ImportError as e:
+    COHERE_AVAILABLE = False
+    print(f"⚠️  Cohere not available: {e}")
+
+try:
     from cache import get_cached_result, save_to_cache, get_cache_stats
     CACHE_AVAILABLE = True
     print("✅ Redis cache imported successfully")
@@ -25,7 +33,14 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app)
 
-ENGINE_WEIGHTS = {"groq": 0.35, "groq2": 0.30, "ml": 0.20, "rules": 0.10, "url": 0.05}
+ENGINE_WEIGHTS = {
+    "groq":   0.30,
+    "groq2":  0.25,
+    "cohere": 0.20,
+    "ml":     0.15,
+    "rules":  0.07,
+    "url":    0.03
+}
 
 def normalise_groq(r):
     label = str(r.get("label","")).lower()
@@ -36,6 +51,12 @@ def normalise_groq2(r):
     label = str(r.get("label","")).lower()
     score = float(r.get("score",0))
     return {"is_phishing": label=="phishing", "confidence": round(score/100,3), "explanation": r.get("explanation",""), "indicators": []}
+
+def normalise_cohere(r):
+    verdict = str(r.get("verdict","safe")).lower()
+    risk_score = float(r.get("risk_score",0))
+    confidence = float(r.get("confidence",0))
+    return {"is_phishing": verdict in ("phishing","suspicious"), "confidence": round(risk_score/100,3), "explanation": ", ".join(r.get("reasons",[])), "indicators": []}
 
 def normalise_ml(r):
     prediction = str(r.get("prediction","")).lower()
@@ -51,9 +72,18 @@ def normalise_url(r):
     return {"is_phishing": score>=20, "confidence": round(score/100,3), "explanation": "", "indicators": r.get("indicators",[])}
 
 def run_all_engines(email_text):
-    tasks = {"groq": (analyze_with_groq, email_text), "groq2": (analyze_with_groq2, email_text), "ml": (predict_email, email_text), "rules": (detect_phishing_keywords, email_text), "url": (detect_suspicious_urls, email_text)}
+    tasks = {
+        "groq":   (analyze_with_groq,          email_text),
+        "groq2":  (analyze_with_groq2,          email_text),
+        "ml":     (predict_email,               email_text),
+        "rules":  (detect_phishing_keywords,    email_text),
+        "url":    (detect_suspicious_urls,      email_text),
+    }
+    if COHERE_AVAILABLE:
+        tasks["cohere"] = (analyze_with_cohere, email_text)
+
     raw = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
         future_map = {executor.submit(fn, arg): name for name, (fn, arg) in tasks.items()}
         for future in concurrent.futures.as_completed(future_map, timeout=30):
             name = future_map[future]
@@ -62,7 +92,15 @@ def run_all_engines(email_text):
             except Exception as e:
                 logger.error(f"Engine '{name}' error: {e}")
                 raw[name] = {"score": 0, "indicators": [], "error": str(e)}
-    normalise_fn = {"groq": normalise_groq, "groq2": normalise_groq2, "ml": normalise_ml, "rules": normalise_rules, "url": normalise_url}
+
+    normalise_fn = {
+        "groq":   normalise_groq,
+        "groq2":  normalise_groq2,
+        "cohere": normalise_cohere,
+        "ml":     normalise_ml,
+        "rules":  normalise_rules,
+        "url":    normalise_url
+    }
     normalised = {}
     for name, result in raw.items():
         try:
@@ -90,7 +128,15 @@ def calculate_final_score(engine_results):
             groq_explanation = result["explanation"]
     final_score = round(weighted_score * 100, 1)
     label = "phishing" if final_score >= 65 else "suspicious" if final_score >= 35 else "safe"
-    return {"score": final_score, "label": label, "confidence": round(abs(final_score-50)/50,2), "votes": f"{votes_phishing}/{len(engine_results)} engines flagged", "indicators": list(set(all_indicators)), "explanation": groq_explanation, "engine_breakdown": {name: {"is_phishing": r["is_phishing"], "confidence": r["confidence"]} for name, r in engine_results.items()}}
+    return {
+        "score": final_score,
+        "label": label,
+        "confidence": round(abs(final_score-50)/50, 2),
+        "votes": f"{votes_phishing}/{len(engine_results)} engines flagged",
+        "indicators": list(set(all_indicators)),
+        "explanation": groq_explanation,
+        "engine_breakdown": {name: {"is_phishing": r["is_phishing"], "confidence": r["confidence"]} for name, r in engine_results.items()}
+    }
 
 @app.route("/health", methods=["GET"])
 def health():
@@ -98,7 +144,8 @@ def health():
 
 @app.route("/", methods=["GET"])
 def root():
-    return {"status": "running", "version": "4.0", "cache_enabled": CACHE_AVAILABLE, "engines": list(ENGINE_WEIGHTS.keys())}, 200
+    engines = list(ENGINE_WEIGHTS.keys()) if COHERE_AVAILABLE else [e for e in ENGINE_WEIGHTS.keys() if e != "cohere"]
+    return {"status": "running", "version": "5.0", "cache_enabled": CACHE_AVAILABLE, "engines": engines}, 200
 
 @app.route("/api/scan", methods=["POST"])
 def scan_email():
@@ -151,7 +198,12 @@ def cache_stats():
 
 @app.route("/api/engines/status", methods=["GET"])
 def engine_status():
-    return {"groq": True, "groq2": True, "ml": True, "rules": True, "url": True, "total_active": 5, "cache": CACHE_AVAILABLE}, 200
+    return {
+        "groq": True, "groq2": True, "cohere": COHERE_AVAILABLE,
+        "ml": True, "rules": True, "url": True,
+        "total_active": 6 if COHERE_AVAILABLE else 5,
+        "cache": CACHE_AVAILABLE
+    }, 200
 
 @app.errorhandler(404)
 def not_found(e):
@@ -163,6 +215,7 @@ def method_not_allowed(e):
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
-    logger.info("Starting Phishing Detection API v4.0")
+    logger.info("Starting Phishing Detection API v5.0")
+    logger.info(f"Cohere engine: {'ENABLED' if COHERE_AVAILABLE else 'DISABLED'}")
     logger.info(f"Redis cache: {'ENABLED' if CACHE_AVAILABLE else 'DISABLED'}")
     app.run(debug=True, host="0.0.0.0", port=port)
