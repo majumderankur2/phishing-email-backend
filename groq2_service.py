@@ -72,7 +72,7 @@ def analyze_with_groq2(email_text: str) -> dict:
             "label":       verdict,
             "score":       confidence,
             "explanation": reason,
-            "is_phish":    is_phish,
+            "is_phishing": is_phish,
         }
 
     except Exception as e:
@@ -80,5 +80,5 @@ def analyze_with_groq2(email_text: str) -> dict:
             "label":       "safe",
             "score":       0.0,
             "explanation": f"Groq2 error: {str(e)}",
-            "is_phish":    False,
+            "is_phishing": False,
         }

@@ -6,7 +6,7 @@ client = cohere.ClientV2(api_key=os.environ.get("COHERE_API_KEY", ""))
 def analyze_with_cohere(email_text):
     try:
         response = client.chat(
-            model="command-r-plus",
+            model="command-r-plus-08-2024",
             messages=[
                 {
                     "role": "user",
@@ -41,7 +41,7 @@ Email to analyze:
         elif verdict == "suspicious":
             risk_score = confidence * 0.6
         else:
-            risk_score = 0
+            risk_score = confidence * 0.1
 
         return {
             "verdict": verdict,
