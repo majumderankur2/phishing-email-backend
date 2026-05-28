@@ -1,4 +1,5 @@
 ﻿import os
+import json
 import logging
 import concurrent.futures
 from flask import Flask, request, jsonify
@@ -28,6 +29,42 @@ except ImportError:
     CACHE_AVAILABLE = False
     print("⚠️  cache.py not found — caching disabled")
 
+# Firebase Admin SDK
+try:
+    import firebase_admin
+    from firebase_admin import credentials, firestore
+    service_account_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT", "")
+    if service_account_json:
+        service_account_info = json.loads(service_account_json)
+        cred = credentials.Certificate(service_account_info)
+        firebase_admin.initialize_app(cred)
+        db = firestore.client()
+        FIREBASE_AVAILABLE = True
+        print("✅ Firebase Admin SDK initialized")
+    else:
+        FIREBASE_AVAILABLE = False
+        service_account_info = None
+        db = None
+        print("⚠️  FIREBASE_SERVICE_ACCOUNT not set")
+except Exception as e:
+    FIREBASE_AVAILABLE = False
+    service_account_info = None
+    db = None
+    print(f"⚠️  Firebase init error: {e}")
+
+# Background scheduler
+try:
+    import scheduler as scheduler_module
+    if FIREBASE_AVAILABLE:
+        scheduler_module.firestore_client = db
+        scheduler_module.service_account_info = service_account_info
+    bg_scheduler = scheduler_module.start_scheduler()
+    SCHEDULER_AVAILABLE = True
+    print("✅ Background scheduler started")
+except Exception as e:
+    SCHEDULER_AVAILABLE = False
+    print(f"⚠️  Scheduler error: {e}")
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)s  %(message)s")
 logger = logging.getLogger(__name__)
 app = Flask(__name__)
@@ -55,7 +92,6 @@ def normalise_groq2(r):
 def normalise_cohere(r):
     verdict = str(r.get("verdict","safe")).lower()
     risk_score = float(r.get("risk_score",0))
-    confidence = float(r.get("confidence",0))
     return {"is_phishing": verdict in ("phishing","suspicious"), "confidence": round(risk_score/100,3), "explanation": ", ".join(r.get("reasons",[])), "indicators": []}
 
 def normalise_ml(r):
@@ -124,7 +160,6 @@ def calculate_final_score(engine_results):
             votes_phishing += 1
             weighted_score += w.get(name, 0.1) * confidence
         else:
-            # Safe engines still reduce score slightly but don't add to it
             weighted_score += w.get(name, 0.1) * confidence * 0.1
         all_indicators += result.get("indicators", [])
         if name == "groq" and result.get("explanation"):
@@ -134,6 +169,7 @@ def calculate_final_score(engine_results):
     return {
         "score": final_score,
         "label": label,
+        "verdict": label,
         "confidence": round(abs(final_score-50)/50, 2),
         "votes": f"{votes_phishing}/{len(engine_results)} engines flagged",
         "indicators": list(set(all_indicators)),
@@ -148,7 +184,7 @@ def health():
 @app.route("/", methods=["GET"])
 def root():
     engines = list(ENGINE_WEIGHTS.keys()) if COHERE_AVAILABLE else [e for e in ENGINE_WEIGHTS.keys() if e != "cohere"]
-    return {"status": "running", "version": "5.0", "cache_enabled": CACHE_AVAILABLE, "engines": engines}, 200
+    return {"status": "running", "version": "6.0", "cache_enabled": CACHE_AVAILABLE, "engines": engines, "scheduler": SCHEDULER_AVAILABLE}, 200
 
 @app.route("/api/scan", methods=["POST"])
 def scan_email():
@@ -178,6 +214,29 @@ def scan_email():
         logger.error(f"Error: {e}", exc_info=True)
         return {"error": "Internal server error", "detail": str(e)}, 500
 
+@app.route("/api/register-token", methods=["POST"])
+def register_token():
+    """Save user's Gmail refresh token and FCM token for background scanning."""
+    if not FIREBASE_AVAILABLE:
+        return {"error": "Firebase not available"}, 503
+    try:
+        data = request.get_json(force=True)
+        uid = data.get("uid")
+        refresh_token = data.get("refresh_token")
+        fcm_token = data.get("fcm_token")
+        if not uid:
+            return {"error": "uid required"}, 400
+        doc_data = {"uid": uid}
+        if refresh_token:
+            doc_data["refresh_token"] = refresh_token
+        if fcm_token:
+            doc_data["fcm_token"] = fcm_token
+        db.collection("gmail_tokens").document(uid).set(doc_data, merge=True)
+        return {"status": "Token registered successfully"}, 200
+    except Exception as e:
+        logger.error(f"Token register error: {e}")
+        return {"error": str(e)}, 500
+
 @app.route("/api/cache/clear", methods=["POST"])
 def clear_cache():
     if not CACHE_AVAILABLE:
@@ -205,7 +264,8 @@ def engine_status():
         "groq": True, "groq2": True, "cohere": COHERE_AVAILABLE,
         "ml": True, "rules": True, "url": True,
         "total_active": 6 if COHERE_AVAILABLE else 5,
-        "cache": CACHE_AVAILABLE
+        "cache": CACHE_AVAILABLE,
+        "scheduler": SCHEDULER_AVAILABLE
     }, 200
 
 @app.errorhandler(404)
@@ -218,7 +278,8 @@ def method_not_allowed(e):
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
-    logger.info("Starting Phishing Detection API v5.0")
+    logger.info("Starting Phishing Detection API v6.0")
     logger.info(f"Cohere engine: {'ENABLED' if COHERE_AVAILABLE else 'DISABLED'}")
     logger.info(f"Redis cache: {'ENABLED' if CACHE_AVAILABLE else 'DISABLED'}")
+    logger.info(f"Scheduler: {'ENABLED' if SCHEDULER_AVAILABLE else 'DISABLED'}")
     app.run(debug=True, host="0.0.0.0", port=port)
